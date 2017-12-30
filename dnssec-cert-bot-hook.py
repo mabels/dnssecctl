@@ -7,6 +7,9 @@ from easyzone import easyzone
 import subprocess
 import dns.resolver
 
+# archlinux.clavator.com.	CAA	0 issue "letsencrypt.org"
+# archlinux.clavator.com. CAA     0 issuewild ";"
+
 def updateSoa(cbot_json):
   z = easyzone.zone_from_file(myDomain(cbot_json), myUnsignedRefFname(cbot_json, '.ref.soa'))
   print(z.root.soa.serial)
@@ -16,7 +19,11 @@ def txtDomainLine(cbot_json):
   return "%s. 3600 IN TXT %s" % (cbot_json['txt_domain'], cbot_json['validation'])
 
 def myDomain(cbot_json):
-  return '.'.join(cbot_json['domain'].split('.')[1:])
+  splitted = cbot_json['domain'].split('.')
+  if len(splitted) > 2 :
+    return '.'.join(cbot_json['domain'].split('.')[1:])
+  else:
+    return cbot_json['domain']
 
 def myDomainDir(cbot_json):
   return ''.join(['/etc/bind/zones.signed/', myDomain(cbot_json)])
@@ -39,18 +46,19 @@ def updateTxtDomainLine(cbot_json, dnsList):
     out.append(line)
   print(domainFound)
   print(txtFound)
-  if len(domainFound) <= 0 :
-   return nil
-  for i in txtFound:
+  for i in txtFound: 
    del out[i]
 
-  out.insert(domainFound[-1] + 1, txtDomainLine(cbot_json))
+  if len(domainFound) <= 0 :
+   out.append(txtDomainLine(cbot_json))
+  else:
+   out.insert(domainFound[-1] + 1, txtDomainLine(cbot_json))
   return out
 
 def cleanTxtDomainLine(cbot_json, dnsList):
   return list(filter(lambda x: not (x.startswith(cbot_json['txt_domain']) and x.endswith(cbot_json['validation'])), dnsList))
 
-def signZone(cbot_json):
+def signZone(cbot_json): 
   zoneSaltFname = '/'.join([myDomainDir(cbot_json), 'zone.salt'])
   if not os.path.isfile(zoneSaltFname) :
     return
@@ -59,7 +67,7 @@ def signZone(cbot_json):
   salt = [line.rstrip('\n') for line in open(zoneSaltFname)][0]
   cmds = ["/usr/sbin/dnssec-signzone",
                   "-u", "-S", "-A", "-3", salt, "-N", "INCREMENT",
-                  "-o", myDomain(cbot_json), "-t", myUnsignedRefFname(cbot_json)]
+                  "-o", myDomain(cbot_json), "-t", myUnsignedRefFname(cbot_json)] 
   print(' '.join(cmds))
   subprocess.run(cmds, stderr=subprocess.STDOUT)
   os.chdir(wd)
@@ -90,14 +98,17 @@ def waitForDns(cbot_json):
     founds = []
     for ns in nssList:
       res = dns.resolver.Resolver(configure=False)
-      print(ns)
+      # print(ns)
       res.nameservers = ns
-      txts = res.query(cbot_json['txt_domain'], 'txt')
-      for txt in txts:
-        for str in txt.strings:
-          print("%s == %s %d" % (str.decode(), cbot_json['validation'], str.decode() == cbot_json['validation']))
-          if str.decode() == cbot_json['validation'] :
-            founds.append(txt)
+      try:
+        print("%s:%s" % (cbot_json['txt_domain'], ns))
+        txts = res.query(cbot_json['txt_domain'], 'txt')
+        for txt in txts:
+          for str in txt.strings:
+            if str.decode() == cbot_json['validation'] :
+              founds.append(txt)
+      except dns.exception.DNSException as e:
+        founds = founds
     found = len(founds) == len(nssList)
     if not found :
       print('retry found:%d/%d' % (len(founds), len(nssList)))
@@ -122,13 +133,13 @@ if cbot_json['cmd'] == 'perform_challenge' :
   updateSoa(cbot_json)
   signZone(cbot_json)
   rndc(cbot_json, 'thaw')
-  waitForDns(cbot_json)
+  waitForDns(cbot_json)  
   sys.exit(0)
 
 if cbot_json['cmd'] == 'wait_for_dns' :
-  waitForDns(cbot_json)
+  waitForDns(cbot_json)  
   sys.exit(0)
-
+  
 if cbot_json['cmd'] == 'clean_challenge' :
   print(myUnsignedRefFname(cbot_json, '.le'))
   outfile = open(myUnsignedRefFname(cbot_json, '.ref.orig'), 'w')
@@ -140,7 +151,7 @@ if cbot_json['cmd'] == 'clean_challenge' :
   updateSoa(cbot_json)
   signZone(cbot_json)
   rndc(cbot_json, 'thaw')
-  waitForDns(cbot_json)
+  waitForDns(cbot_json)  
   sys.exit(0)
 
 if cbot_json['cmd'] == 'cleanup' :
